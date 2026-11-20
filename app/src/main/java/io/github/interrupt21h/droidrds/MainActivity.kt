@@ -50,6 +50,11 @@ class MainActivity : Activity() {
         label("D0 → SCL; D1+D2 → SDA; common GND. Verify pull-ups and board voltage. RF commands are not exposed.")
         address = EditText(this).apply { setSingleLine(); setText("63"); hint="7-bit hexadecimal address" }; body.addView(address)
         button("Connect FT232H") { connect() }
+        button("Check I2C bus (non-destructive)") { work {
+            val b = bus ?: error("Connect FT232H first")
+            b.checkIdle()
+            "SCL and SDA idle high. This confirms line levels, not chip identity. Si4703 may require reset before ACK."
+        } }
         button("Probe and read revision") { work {
             val a = address.text.toString().trim().removePrefix("0x").toInt(16)
             require(a == 0x63 || a == 0x11) { "Use a verified Si4713 address" }
@@ -57,12 +62,12 @@ class MainActivity : Activity() {
             if (!radio.probe()) "No ACK" else "ACK observed\n" + radio.revision()
         } }
         label("Si4703 FM receiver", 24f)
-        label("D3 → RST. SEN must be pulled high. Use a dedicated Si4703 bus during reset; verify 3.3 V logic.")
+        label("D3 → RST; SEN → 3.3 V through 4.7 kΩ if no onboard pull-up. D1 and D2 must both connect to SDIO. Use a dedicated Si4703 bus. Detection checks reset strap, idle levels, ACK and chip ID.")
         val rxFreq = EditText(this).apply { setSingleLine(); inputType=8194; setText("99.5"); hint="MHz" }
         body.addView(rxFreq)
         val crystal = CheckBox(this).apply { text="Module has 32.768 kHz crystal"; isChecked=true }
         body.addView(crystal)
-        button("Initialize Si4703") {
+        button("Detect and initialize Si4703") {
             if (!busy) AlertDialog.Builder(this).setTitle("Reset receiver")
                 .setMessage("Confirm D3 is connected to Si4703 RST, SEN is high, and no other target shares this bus during reset.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Initialize") { _, _ ->
@@ -70,9 +75,12 @@ class MainActivity : Activity() {
                     work {
                         val b = bus ?: error("Connect FT232H first")
                         si4703 = null
+                        rda = null
                         b.resetSi4703()
+                        if (!b.probe(0x10)) error("No ACK at 0x10 after reset. Verify SEN high, D3 to RST, D1+D2 to SDIO, 3.3 V and common ground.")
                         val chip = Si4703(b)
-                        val result = chip.initialize(useCrystal)
+                        val identity = chip.identify()
+                        val result = identity + "\n" + chip.initialize(useCrystal)
                         si4703 = chip
                         result
                     }
@@ -99,6 +107,8 @@ class MainActivity : Activity() {
         button("Initialize RDA5807M") {
             work {
                 rda=null
+                si4703=null
+                (bus ?: error("Connect FT232H first")).checkIdle()
                 val chip=Rda5807(bus ?: error("Connect FT232H first"))
                 val result=chip.initialize()
                 rda=chip
