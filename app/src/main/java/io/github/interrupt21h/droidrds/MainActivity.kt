@@ -134,7 +134,7 @@ class MainActivity : Activity() {
         fun radioText(value:String,size:Float,color:Int=Color.WHITE)=TextView(this).apply { text=value; textSize=size; setTextColor(color); setPadding(0,dp(4),0,dp(4)) }
         fun radioButton(value:String,action:()->Unit)=Button(this).apply { text=value; isAllCaps=false; setTextColor(Color.WHITE); background=panel(Color.rgb(34,68,88)); minHeight=dp(48); setOnClickListener { action() } }
         radioPane.addView(radioText("droidRDS  /  FM receiver",22f,Color.rgb(105,230,210)))
-        frequencyDisplay=radioText("— MHz",42f,Color.rgb(105,230,210)).apply { gravity=android.view.Gravity.CENTER; typeface=android.graphics.Typeface.create("sans-serif-light",0) }
+        frequencyDisplay=radioText("— MHz",42f,Color.rgb(105,230,210)).apply { gravity=android.view.Gravity.CENTER; typeface=android.graphics.Typeface.create("sans-serif-light",android.graphics.Typeface.NORMAL) }
         radioPane.addView(frequencyDisplay)
         radioStatus=radioText("Initialize receiver in Setup",14f)
         radioPane.addView(radioStatus)
