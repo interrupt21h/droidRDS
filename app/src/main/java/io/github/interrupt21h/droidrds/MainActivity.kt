@@ -98,13 +98,14 @@ class MainActivity : Activity() {
         fun button(s: String, f: () -> Unit) { body.addView(Button(this).apply { text=s; setOnClickListener { f() } }) }
         label("droidRDS", 32f)
         label("FT232H • FM/RDS laboratory diagnostics")
+        label("Build: "+packageManager.getPackageInfo(packageName,0).versionName, 13f)
         val selector = Spinner(this)
         selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Si4703 receiver", "RDA5807M receiver", "Si4713 diagnostics", "Offline tools"))
         body.addView(selector)
         live = TextView(this).apply { text = "No receiver initialized"; textSize = 15f; setTextIsSelectable(true); typeface = android.graphics.Typeface.MONOSPACE }
         body.addView(live)
         label("Last operation / initialization trace")
-        output = TextView(this).apply { setTextIsSelectable(true); text="Diagnostic build: power trace v2"; textSize=14f; typeface=android.graphics.Typeface.MONOSPACE }
+        output = TextView(this).apply { setTextIsSelectable(true); text=getPreferences(MODE_PRIVATE).getString("lastDiagnostics","Ready — power diagnostics v3"); textSize=14f; typeface=android.graphics.Typeface.MONOSPACE }
         body.addView(output)
         button("Copy operation diagnostics") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS",output.text)) }
         autoRefresh = CheckBox(this).apply { text = "Live telemetry (every 2 seconds when idle)"; isChecked = true }
@@ -133,11 +134,14 @@ class MainActivity : Activity() {
         body.addView(rxFreq)
         val crystal = CheckBox(this).apply { text="Module has 32.768 kHz crystal"; isChecked=true }
         body.addView(crystal)
+        val delay = EditText(this).apply { setSingleLine(); inputType=2; setText("650"); hint="Crystal startup delay (500–10000 ms)" }
+        body.addView(delay)
         button("Detect and initialize Si4703") {
             if (!busy) AlertDialog.Builder(this).setTitle("Reset receiver")
                 .setMessage("Confirm D3 is connected to Si4703 RST, SEN is high, and no other target shares this bus during reset.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Initialize") { _, _ ->
                     val useCrystal = crystal.isChecked
+                    val wait = delay.text.toString().toLongOrNull()?.coerceIn(500,10000) ?: 650L
                     work {
                         val b = bus ?: error("Connect FT232H first")
                         si4703 = null
@@ -145,11 +149,32 @@ class MainActivity : Activity() {
                         b.resetSi4703()
                         if (!b.probe(0x10)) error("No ACK at 0x10 after reset. Verify SEN high, D3 to RST, D1+D2 to SDIO, 3.3 V and common ground.")
                         val chip = Si4703(b)
-                        val result = chip.initialize(useCrystal) { trace -> runOnUiThread { if (!isDestroyed) output.text = trace } }
+                        val result = chip.initialize(useCrystal, wait) { trace -> runOnUiThread { if (!isDestroyed) output.text = trace } }
                         si4703 = chip
                         result
                     }
                 }.show()
+        }
+        label("Advanced startup diagnostics", 20f)
+        button("1. Reset only (dedicated Si4703 bus)") {
+            if (!busy) AlertDialog.Builder(this).setMessage("Confirm D3 is wired to RST and only the Si4703 is connected.").setNegativeButton("Cancel",null).setPositiveButton("Reset") { _,_ ->
+                work {
+                    val b=bus ?: error("Connect FT232H first")
+                    si4703=null; rda=null
+                    b.resetSi4703()
+                    b.lineReport()+"\n"+Si4703(b).rawDiagnostics()
+                }
+            }.show()
+        }
+        button("2. Enable crystal only") {
+            val wait=delay.text.toString().toLongOrNull()?.coerceIn(500,10000) ?: 650L
+            work { si4703=null; rda=null; Si4703(bus ?: error("Connect FT232H first")).oscillatorTest(wait) }
+        }
+        button("3. Power enable (register 02 only)") {
+            work { si4703=null; rda=null; Si4703(bus ?: error("Connect FT232H first")).powerTest(false) }
+        }
+        button("3b. Power enable (reference-style registers 02–07)") {
+            work { si4703=null; rda=null; Si4703(bus ?: error("Connect FT232H first")).powerTest(true) }
         }
         button("Read raw Si4703 registers (even if initialization failed)") { work { Si4703(bus ?: error("Connect FT232H first")).rawDiagnostics() } }
         button("Tune receiver") {
@@ -274,7 +299,7 @@ class MainActivity : Activity() {
             val result=try { task() } catch(e: Exception) { "Error: "+e.message }
             runOnUiThread {
                 busy=false
-                if (!isDestroyed && token == generation) { output.text=result; failures=0 }
+                if (!isDestroyed && token == generation) { output.text=result; failures=0; getPreferences(MODE_PRIVATE).edit().putString("lastDiagnostics",result.take(32000)).apply() }
                 else { bus?.close(); bus=null; si4703=null; rda=null }
             }
         }
