@@ -22,24 +22,47 @@ class Si4703(private val bus: Ft232h) {
         require(r[0] == 0x1242 && ((r[1] ushr 6) and 15) in 8..9) { "Unexpected Si4703 identity: %04X %04X; ACK alone is not identification".format(r[0],r[1]) }
         return "Si4703-family identity: %04X %04X".format(r[0],r[1])
     }
+    private fun powerState(): String =
+        "DEVICEID=%04X CHIPID=%04X POWERCFG=%04X TEST1=%04X DEV=%d FW=%d".format(
+            r[0],r[1],r[2],r[7],(r[1] ushr 6) and 15,r[1] and 63)
     fun initialize(crystal: Boolean = true): String {
         identify()
-        if (crystal) {
-            r[7] = 0x8100
-            write(7)
-            Thread.sleep(500)
+        val trace = mutableListOf("After reset: "+powerState())
+        try {
+            if (crystal) {
+                r[7] = 0x8100
+                write(7)
+                Thread.sleep(650)
+                read()
+                trace.add("After oscillator enable: "+powerState())
+                check(r[7] and 0x8000 != 0) { "XOSCEN did not latch" }
+            }
+            r[2] = 0x4001
+            write(2)
+            Thread.sleep(150)
+            val deadline = SystemClock.elapsedRealtime()+3000
+            do {
+                read()
+                trace.add("Power-up readback: "+powerState())
+                if (((r[1] ushr 6) and 15) == 9 && r[2] and 0x41 == 1) break
+                Thread.sleep(100)
+            } while (SystemClock.elapsedRealtime()<deadline)
+            check(((r[1] ushr 6) and 15) == 9 && r[2] and 0x41 == 1) {
+                "Si4703 power-up verification failed; inspect clock, supply and register readbacks"
+            }
+            r[2] = 0x4801
+            r[3] = 0
+            r[4] = 0x1000
+            r[5] = 0x1911
+            r[6] = 0x0044
+            write()
             read()
+            trace.add("After configuration: "+powerState())
+            check(r[2] and 0x41 == 1) { "Power state lost after configuration" }
+            return trace.joinToString("\n")+"\n"+report()
+        } catch(e: Exception) {
+            throw IOException(trace.joinToString("\n")+"\n"+(e.message ?: "Initialization failed"),e)
         }
-        r[2] = 0x4801 // DMUTE, verbose RDS, ENABLE
-        r[3] = 0
-        r[4] = 0x1000 // RDS, US 75 us de-emphasis
-        r[5] = 0x1911 // seek threshold 25, US/EU band, 100 kHz, volume 1
-        r[6] = 0x0044
-        write()
-        Thread.sleep(120)
-        read()
-        check(((r[1] ushr 6) and 15) == 9 && r[2] and 1 != 0) { "Receiver did not power up" }
-        return report()
     }
     private fun awaitStc(state: Boolean, timeout: Long) {
         val start = SystemClock.elapsedRealtime()
