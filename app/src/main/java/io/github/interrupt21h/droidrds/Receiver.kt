@@ -10,7 +10,7 @@ class Receiver(private val bus: Ft232h, private val kind: ReceiverKind) {
         val status = words[0]
         val quality = words[1]
         val ready = status and 0x8000 != 0
-        val synced = status and 0x0800 != 0
+        val synced = status and (if(kind == ReceiverKind.SI4703) 0x0800 else 0x1000) != 0
         val group = if (ready && synced) RdsGroup(words[2], words[3], words[4], words[5]) else null
         val rssi = if (kind == ReceiverKind.SI4703) status and 255 else (quality ushr 9) and 127
         val stereo = if (kind == ReceiverKind.SI4703) status and 0x0100 != 0 else status and 0x0400 != 0
