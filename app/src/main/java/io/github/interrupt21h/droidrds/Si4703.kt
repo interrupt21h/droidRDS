@@ -19,7 +19,7 @@ class Si4703(private val bus: Ft232h) {
     }
     fun initialize(crystal: Boolean = true): String {
         read()
-        require(r[0] and 0xfff == 0x242 && (r[1] ushr 6) and 15 == 9) { "Unexpected Si4703 identity: %04X %04X".format(r[0],r[1]) }
+        require(r[0] == 0x1242 && ((r[1] ushr 6) and 15) in 8..9) { "Unexpected Si4703 identity: %04X %04X".format(r[0],r[1]) }
         if (crystal) {
             r[7] = 0x8100
             write(7)
@@ -34,6 +34,7 @@ class Si4703(private val bus: Ft232h) {
         write()
         Thread.sleep(120)
         read()
+        check(((r[1] ushr 6) and 15) == 9 && r[2] and 1 != 0) { "Receiver did not power up" }
         return report()
     }
     private fun awaitStc(state: Boolean, timeout: Long) {
