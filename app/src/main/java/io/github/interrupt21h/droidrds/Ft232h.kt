@@ -10,6 +10,7 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
     private val tx: UsbEndpoint
     private val rx: UsbEndpoint
     private var closed = false
+    private var resetHeldHigh = false
     init {
         try {
             if (!conn.claimInterface(iface, true)) throw IOException("USB interface claim failed")
@@ -41,7 +42,7 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
     }
     private fun gpio(scl:Boolean,sda:Boolean) {
         val dir=(if(scl)0 else 1) or (if(sda)0 else 2)
-        send(0x80,0,dir)
+        send(0x80,if(resetHeldHigh) 8 else 0,dir or (if(resetHeldHigh) 8 else 0))
     }
     /** D3 -> RST, SEN high via board pull-up. Exclusive receiver bus only. */
     @Synchronized fun resetSi4703() {
@@ -49,7 +50,8 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
         Thread.sleep(5)
         send(0x80, 0x08, 0x0a)
         Thread.sleep(5)
-        send(0x80, 0, 0)
+        resetHeldHigh = true
+        send(0x80, 8, 8)
         Thread.sleep(5)
     }
     private fun start() { gpio(true,true); gpio(true,false); gpio(false,false) }
