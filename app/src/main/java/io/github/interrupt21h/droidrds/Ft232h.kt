@@ -43,6 +43,15 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
         val dir=(if(scl)0 else 1) or (if(sda)0 else 2)
         send(0x80,0,dir)
     }
+    /** D3 -> RST, SEN high via board pull-up. Exclusive receiver bus only. */
+    @Synchronized fun resetSi4703() {
+        send(0x80, 0, 0x0a)
+        Thread.sleep(5)
+        send(0x80, 0x08, 0x0a)
+        Thread.sleep(5)
+        send(0x80, 0, 0)
+        Thread.sleep(5)
+    }
     private fun start() { gpio(true,true); gpio(true,false); gpio(false,false) }
     private fun stop() { gpio(false,false); gpio(true,false); gpio(true,true) }
     private fun byte(value:Int):Boolean {
