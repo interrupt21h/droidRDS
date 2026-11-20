@@ -12,8 +12,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+      - name: Set unique build identifier
+        run: echo "DROIDRDS_BUILD_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
       - run: gradle --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+      - name: Stage uniquely named APK and checksum
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/droidRDS-debug-$DROIDRDS_BUILD_ID.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
         with:
-          name: droidRDS-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: droidRDS-debug-${{ env.DROIDRDS_BUILD_ID }}
+          path: dist/
+          if-no-files-found: error
