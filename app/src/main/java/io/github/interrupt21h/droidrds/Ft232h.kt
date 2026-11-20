@@ -21,7 +21,7 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
             control(0,0); control(9,1); control(11,0); control(11,0x0200)
             Thread.sleep(60)
             send(0x8a,0x97,0x8d,0x85,0x80,0,0,0x82,0,0)
-            if (pins() and 0x05 != 0x05) throw IOException("SCL/SDA not high; check pull-ups")
+            // Defer idle-bus validation until after receiver mode selection.
         } catch (e: Exception) { close(); throw e }
     }
     private fun control(request:Int,value:Int) {
@@ -46,13 +46,26 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
     }
     /** D3 -> RST, SEN high via board pull-up. Exclusive receiver bus only. */
     @Synchronized fun resetSi4703() {
+        resetHeldHigh = false
+        send(0x80, 0, 0x08)
+        Thread.sleep(5)
         send(0x80, 0, 0x0a)
         Thread.sleep(5)
+        val sample = pins()
+        if (sample and 0x05 != 0x01) {
+            send(0x80, 0, 0)
+            throw IOException("Reset strap failed: SCL must be high and SDA low. Check D0, D1+D2, pull-ups and shorts.")
+        }
         send(0x80, 0x08, 0x0a)
         Thread.sleep(5)
         resetHeldHigh = true
         send(0x80, 8, 8)
         Thread.sleep(5)
+        checkIdle()
+    }
+    @Synchronized fun checkIdle() {
+        val p = pins()
+        if (p and 5 != 5) throw IOException("I2C idle failure: SCL=${p and 1 != 0}, SDA=${p and 4 != 0}. Check pull-ups, wiring and reset.")
     }
     private fun start() { gpio(true,true); gpio(true,false); gpio(false,false) }
     private fun stop() { gpio(false,false); gpio(true,false); gpio(true,true) }
