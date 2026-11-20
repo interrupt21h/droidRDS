@@ -17,9 +17,13 @@ class Si4703(private val bus: Ft232h) {
         }
         bus.writeCommand(0x10, bytes)
     }
-    fun initialize(crystal: Boolean = true): String {
+    fun identify(): String {
         read()
-        require(r[0] == 0x1242 && ((r[1] ushr 6) and 15) in 8..9) { "Unexpected Si4703 identity: %04X %04X".format(r[0],r[1]) }
+        require(r[0] == 0x1242 && ((r[1] ushr 6) and 15) in 8..9) { "Unexpected Si4703 identity: %04X %04X; ACK alone is not identification".format(r[0],r[1]) }
+        return "Si4703-family identity: %04X %04X".format(r[0],r[1])
+    }
+    fun initialize(crystal: Boolean = true): String {
+        identify()
         if (crystal) {
             r[7] = 0x8100
             write(7)
