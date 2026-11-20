@@ -67,6 +67,10 @@ class Ft232h(manager: UsbManager, device: UsbDevice) : AutoCloseable {
         val p = pins()
         if (p and 5 != 5) throw IOException("I2C idle failure: SCL=${p and 1 != 0}, SDA=${p and 4 != 0}. Check pull-ups, wiring and reset.")
     }
+    @Synchronized fun lineReport(): String {
+        val p = pins()
+        return "GPIO %02X • SCL(D0)=%d SDA(D2)=%d RST(D3)=%d".format(p,p and 1,(p shr 2) and 1,(p shr 3) and 1)
+    }
     private fun start() { gpio(true,true); gpio(true,false); gpio(false,false) }
     private fun stop() { gpio(false,false); gpio(true,false); gpio(true,true) }
     private fun byte(value:Int):Boolean {
