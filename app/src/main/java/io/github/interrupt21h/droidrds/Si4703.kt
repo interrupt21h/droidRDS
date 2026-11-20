@@ -19,22 +19,25 @@ class Si4703(private val bus: Ft232h) {
     }
     fun identify(): String {
         read()
-        require(r[0] == 0x1242 && ((r[1] ushr 6) and 15) in 8..9) { "Unexpected Si4703 identity: %04X %04X; ACK alone is not identification".format(r[0],r[1]) }
+        require(r[0] == 0x1242 && ((r[1] ushr 6) and 15) in listOf(0, 8, 9)) { "Unexpected Si4703 identity: %04X %04X; ACK alone is not identification".format(r[0],r[1]) }
         return "Si4703-family identity: %04X %04X".format(r[0],r[1])
     }
     private fun powerState(): String =
         "DEVICEID=%04X CHIPID=%04X POWERCFG=%04X TEST1=%04X DEV=%d FW=%d".format(
             r[0],r[1],r[2],r[7],(r[1] ushr 6) and 15,r[1] and 63)
-    fun initialize(crystal: Boolean = true): String {
-        identify()
-        val trace = mutableListOf("After reset: "+powerState())
+    fun initialize(crystal: Boolean = true, progress: (String) -> Unit = {}): String {
+        val trace = mutableListOf<String>()
+        fun record(s: String) { trace.add(s); progress(trace.joinToString("\n")) }
         try {
+            read()
+            record("After reset: "+powerState())
+            require(r[0] == 0x1242) { "Unexpected DEVICEID" }
             if (crystal) {
                 r[7] = 0x8100
                 write(7)
                 Thread.sleep(650)
                 read()
-                trace.add("After oscillator enable: "+powerState())
+                record("After oscillator enable: "+powerState())
                 check(r[7] and 0x8000 != 0) { "XOSCEN did not latch" }
             }
             r[2] = 0x4001
@@ -43,7 +46,7 @@ class Si4703(private val bus: Ft232h) {
             val deadline = SystemClock.elapsedRealtime()+3000
             do {
                 read()
-                trace.add("Power-up readback: "+powerState())
+                record("Power-up readback: "+powerState())
                 if (((r[1] ushr 6) and 15) == 9 && r[2] and 0x41 == 1) break
                 Thread.sleep(100)
             } while (SystemClock.elapsedRealtime()<deadline)
@@ -57,7 +60,7 @@ class Si4703(private val bus: Ft232h) {
             r[6] = 0x0044
             write()
             read()
-            trace.add("After configuration: "+powerState())
+            record("After configuration: "+powerState())
             check(r[2] and 0x41 == 1) { "Power state lost after configuration" }
             return trace.joinToString("\n")+"\n"+report()
         } catch(e: Exception) {
@@ -109,6 +112,10 @@ class Si4703(private val bus: Ft232h) {
         return "Si4703 • %.1f MHz • RSSI %d • %s\nRDS sync: %s".format(
             (87500+(r[11] and 1023)*100)/1000.0,r[10] and 255,
             if(r[10] and 0x100 != 0) "Stereo" else "Mono",r[10] and 0x800 != 0)
+    }
+    fun rawDiagnostics(): String {
+        read()
+        return powerState()+"\n"+(0..15).joinToString("\n") { "%02X: %04X".format(it,r[it]) }
     }
     fun diagnostics(): String {
         val start = SystemClock.elapsedRealtime()
