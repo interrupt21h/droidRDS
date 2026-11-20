@@ -103,6 +103,10 @@ class MainActivity : Activity() {
         body.addView(selector)
         live = TextView(this).apply { text = "No receiver initialized"; textSize = 15f; setTextIsSelectable(true); typeface = android.graphics.Typeface.MONOSPACE }
         body.addView(live)
+        label("Last operation / initialization trace")
+        output = TextView(this).apply { setTextIsSelectable(true); text="Diagnostic build: power trace v2"; textSize=14f; typeface=android.graphics.Typeface.MONOSPACE }
+        body.addView(output)
+        button("Copy operation diagnostics") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS",output.text)) }
         autoRefresh = CheckBox(this).apply { text = "Live telemetry (every 2 seconds when idle)"; isChecked = true }
         body.addView(autoRefresh)
         
@@ -141,13 +145,13 @@ class MainActivity : Activity() {
                         b.resetSi4703()
                         if (!b.probe(0x10)) error("No ACK at 0x10 after reset. Verify SEN high, D3 to RST, D1+D2 to SDIO, 3.3 V and common ground.")
                         val chip = Si4703(b)
-                        val identity = chip.identify()
-                        val result = identity + "\n" + chip.initialize(useCrystal)
+                        val result = chip.initialize(useCrystal) { trace -> runOnUiThread { if (!isDestroyed) output.text = trace } }
                         si4703 = chip
                         result
                     }
                 }.show()
         }
+        button("Read raw Si4703 registers (even if initialization failed)") { work { Si4703(bus ?: error("Connect FT232H first")).rawDiagnostics() } }
         button("Tune receiver") {
             val khz = rxFreq.text.toString().toBigDecimalOrNull()?.multiply(java.math.BigDecimal(1000))
             work { (si4703 ?: error("Initialize receiver first")).tune(khz?.intValueExact() ?: error("Invalid MHz")) }
@@ -226,7 +230,7 @@ class MainActivity : Activity() {
             } catch(e:Exception) { output.text=e.message }
         }
         val offlineEnd = body.childCount
-        output = TextView(this).apply { setTextIsSelectable(true); text="Ready"; textSize=15f; setTextColor(Color.rgb(130,220,210)) }; body.addView(output)
+        
         button("Copy report") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS",output.text)) }
         fun showProfile(position: Int) {
             for (i in txStart until offlineEnd) {
