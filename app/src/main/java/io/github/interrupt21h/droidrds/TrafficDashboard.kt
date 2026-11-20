@@ -32,11 +32,12 @@ class TrafficDashboard(context:Context): LinearLayout(context) {
         override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup?):View {
             val c=getItem(position); val g=c.group
             val box=LinearLayout(context).apply { orientation=VERTICAL; setPadding(dp(14),dp(11),dp(14),dp(11)); background=background(Color.rgb(22,39,53)) }
-            val title=when { isAlert(c)->"Event ${g.c and 2047}"; g.type==3->"ALERT-C service"; g.b and 16!=0->"System / tuning"; else->"Multi-group fragment" }
+            val title=when { isAlert(c)->TrafficEvents.name(g.c and 2047) ?: "Event ${g.c and 2047}"; g.type==3->"ALERT-C service"; g.b and 16!=0->"System / tuning"; else->"Multi-group fragment" }
             box.addView(label(title,20f,if(isAlert(c)) teal else ink).apply { typeface=Typeface.DEFAULT_BOLD })
             val clock=SimpleDateFormat("HH:mm:ss",Locale.US)
             box.addView(label("PI %04X  •  %d%s  •  %s  •  ×%d reads".format(g.a,g.type,g.version,clock.format(Date(c.last)),c.count),12f,muted))
             if(isAlert(c)) {
+                box.addView(label("EVENT ${g.c and 2047} · "+if(TrafficEvents.name(g.c and 2047)!=null) "Catalogue match" else "Description unavailable",12f,muted))
                 val pair=LinearLayout(context)
                 val loc=LinearLayout(context).apply { orientation=VERTICAL }
                 loc.addView(label("LOCATION WORD",11f,muted))
@@ -46,9 +47,11 @@ class TrafficDashboard(context:Context): LinearLayout(context) {
                 val detail=LinearLayout(context).apply { orientation=VERTICAL }
                 detail.addView(label("EXTENT / DURATION",11f,muted))
                 detail.addView(label("${(g.c shr 11) and 7} / ${g.b and 7}",22f))
-                detail.addView(label("Direction ${(g.c shr 14) and 1} · Diversion ${g.c ushr 15}",12f,muted))
+                detail.addView(label("Extent offsets / duration code",11f,muted))
                 pair.addView(detail,LayoutParams(0,-2,1f))
                 box.addView(pair)
+                box.addView(label(TrafficEvents.direction((g.c shr 14) and 1)+" · "+TrafficEvents.diversion(g.c ushr 15),13f,ink))
+                box.addView(label("First seen "+clock.format(Date(c.first)),12f,muted))
                 box.addView(label("Unresolved location • may be encrypted",12f,amber))
                 box.addView(label(if(c.confirmed) "ALERT-C assignment observed" else "Unconfirmed service assignment",12f,muted))
             } else box.addView(label(if(g.type==3) "AID CD46 • assigned group %02X".format(g.b and 31) else if(g.b and 16!=0) "Variant ${g.b and 15}" else "Continuity index ${g.b and 7}",14f))
