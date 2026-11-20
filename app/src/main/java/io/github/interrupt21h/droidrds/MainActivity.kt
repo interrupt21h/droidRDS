@@ -52,6 +52,18 @@ class MainActivity : Activity() {
             val radio = Radio(bus ?: error("Connect FT232H first"), a)
             if (!radio.probe()) "No ACK" else "ACK observed\n" + radio.revision()
         } }
+        label("Receiver register capture", 22f)
+        label("Select the known receiver model. A shared 0x10 ACK is not identification. Receiver must be powered, tuned and configured for RDS externally.")
+        for (kind in ReceiverKind.entries) {
+            button("Read " + kind.name + " snapshot") {
+                work {
+                    val s = Receiver(bus ?: error("Connect FT232H first"), kind).snapshot()
+                    "RSSI: ${s.rssi} Stereo: ${s.stereo}\nRegisters: " +
+                        s.registers.joinToString(" ") { "%04X".format(it) } +
+                        "\n\n" + (s.group?.describe() ?: "No synchronized ready RDS group")
+                }
+            }
+        }
         label("Offline frequency planner", 22f)
         val freq = EditText(this).apply { setSingleLine(); inputType=8194; setText("99.5") }; body.addView(freq)
         button("Validate frequency (no RF)") {
