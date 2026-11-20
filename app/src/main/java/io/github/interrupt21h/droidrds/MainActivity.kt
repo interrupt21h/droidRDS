@@ -17,6 +17,7 @@ class MainActivity : Activity() {
     private lateinit var address: EditText
     private var bus: Ft232h? = null
     private var busy = false
+    private var si4703: Si4703? = null
     private val permission = "io.github.interrupt21h.droidrds.USB"
     private val receiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -24,6 +25,7 @@ class MainActivity : Activity() {
                 if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED,false)) connect()
                 else output.text = "USB permission denied"
             } else if (intent.action == UsbManager.ACTION_USB_DEVICE_DETACHED) {
+                si4703 = null
                 output.text = "USB detached; reconnect before diagnostics"
             }
         }
@@ -52,6 +54,44 @@ class MainActivity : Activity() {
             val radio = Radio(bus ?: error("Connect FT232H first"), a)
             if (!radio.probe()) "No ACK" else "ACK observed\n" + radio.revision()
         } }
+        label("Si4703 FM receiver", 24f)
+        label("D3 → RST. SEN must be pulled high. Use a dedicated Si4703 bus during reset; verify 3.3 V logic.")
+        val rxFreq = EditText(this).apply { setSingleLine(); inputType=8194; setText("99.5"); hint="MHz" }
+        body.addView(rxFreq)
+        val crystal = CheckBox(this).apply { text="Module has 32.768 kHz crystal"; isChecked=true }
+        body.addView(crystal)
+        button("Initialize Si4703") {
+            if (!busy) AlertDialog.Builder(this).setTitle("Reset receiver")
+                .setMessage("Confirm D3 is connected to Si4703 RST, SEN is high, and no other target shares this bus during reset.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Initialize") { _, _ ->
+                    val useCrystal = crystal.isChecked
+                    work {
+                        val b = bus ?: error("Connect FT232H first")
+                        si4703 = null
+                        b.resetSi4703()
+                        val chip = Si4703(b)
+                        val result = chip.initialize(useCrystal)
+                        si4703 = chip
+                        result
+                    }
+                }.show()
+        }
+        button("Tune receiver") {
+            val khz = rxFreq.text.toString().toBigDecimalOrNull()?.multiply(java.math.BigDecimal(1000))
+            work { (si4703 ?: error("Initialize receiver first")).tune(khz?.intValueExact() ?: error("Invalid MHz")) }
+        }
+        button("Seek down") { work { (si4703 ?: error("Initialize receiver first")).seek(false) } }
+        button("Seek up") { work { (si4703 ?: error("Initialize receiver first")).seek(true) } }
+        button("Refresh receiver status") { work { (si4703 ?: error("Initialize receiver first")).report() } }
+        val volume = SeekBar(this).apply { max=15; progress=1 }
+        body.addView(volume)
+        button("Apply volume") {
+            val level = volume.progress
+            work { (si4703 ?: error("Initialize receiver first")).volume(level) }
+        }
+        button("Capture RDS for 10 seconds") {
+            work { (si4703 ?: error("Initialize receiver first")).capture(10) }
+        }
         label("Receiver register capture", 22f)
         label("Select the known receiver model. A shared 0x10 ACK is not identification. Receiver must be powered, tuned and configured for RDS externally.")
         for (kind in ReceiverKind.entries) {
@@ -87,7 +127,7 @@ class MainActivity : Activity() {
         if (!usb.hasPermission(device)) {
             usb.requestPermission(device,PendingIntent.getBroadcast(this,0,Intent(permission).setPackage(packageName),PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)); return
         }
-        work { bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected" }
+        work { si4703=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected" }
     }
     private fun work(task: () -> String) {
         if (busy) return
