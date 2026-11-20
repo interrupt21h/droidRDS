@@ -25,7 +25,7 @@ class MainActivity : Activity() {
     private var deviceName: String? = null
     private var failures = 0
     private val traffic = TrafficFeed()
-    private lateinit var trafficView: TextView
+    private lateinit var trafficView: TrafficDashboard
     private lateinit var trafficEnabled: CheckBox
     private lateinit var radioStatus: TextView
     private lateinit var frequencyDisplay: TextView
@@ -66,7 +66,7 @@ class MainActivity : Activity() {
                         } else {
                             result.fold(onSuccess = {
                                 failures = 0
-                                if (collect && SystemClock.elapsedRealtime()-lastTrafficRender>=750) { trafficView.text = traffic.report(); lastTrafficRender=SystemClock.elapsedRealtime() }
+                                if (collect && SystemClock.elapsedRealtime()-lastTrafficRender>=750) { trafficView.update(traffic.frame()); lastTrafficRender=SystemClock.elapsedRealtime() }
                                 live.text = "Updated " + java.text.DateFormat.getTimeInstance().format(java.util.Date()) + "\n" + it
                             }, onFailure = {
                                 failures++
@@ -133,8 +133,8 @@ class MainActivity : Activity() {
         scroll.visibility=android.view.View.GONE
         fun radioText(value:String,size:Float,color:Int=Color.WHITE)=TextView(this).apply { text=value; textSize=size; setTextColor(color); setPadding(0,dp(4),0,dp(4)) }
         fun radioButton(value:String,action:()->Unit)=Button(this).apply { text=value; isAllCaps=false; setTextColor(Color.WHITE); background=panel(Color.rgb(34,68,88)); minHeight=dp(48); setOnClickListener { action() } }
-        radioPane.addView(radioText("droidRDS  /  FM receiver",22f,Color.rgb(105,230,210)))
-        frequencyDisplay=radioText("— MHz",42f,Color.rgb(105,230,210)).apply { gravity=android.view.Gravity.CENTER; typeface=android.graphics.Typeface.create("sans-serif-light",android.graphics.Typeface.NORMAL) }
+        radioPane.addView(radioText("droidRDS  /  FM receiver",15f,Color.rgb(105,230,210)))
+        frequencyDisplay=radioText("— MHz",34f,Color.rgb(105,230,210)).apply { gravity=android.view.Gravity.CENTER; typeface=android.graphics.Typeface.create("sans-serif-light",android.graphics.Typeface.NORMAL) }
         radioPane.addView(frequencyDisplay)
         radioStatus=radioText("Initialize receiver in Setup",14f)
         radioPane.addView(radioStatus)
@@ -151,7 +151,7 @@ class MainActivity : Activity() {
         radioPane.addView(controls)
         val seekRow=LinearLayout(this)
         for(up in listOf(false,true)) seekRow.addView(radioButton(if(up) "Seek ›" else "‹ Seek") { work { si4703?.seek(up) ?: rda?.seek(up) ?: error("Initialize receiver in Setup") } },LinearLayout.LayoutParams(0,-2,1f))
-        radioPane.addView(seekRow)
+        radioPane.addView(seekRow,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(5) })
         radioTab.setOnClickListener { radioPane.visibility=android.view.View.VISIBLE; scroll.visibility=android.view.View.GONE }
         setupTab.setOnClickListener { radioPane.visibility=android.view.View.GONE; scroll.visibility=android.view.View.VISIBLE }
         label("droidRDS", 32f)
@@ -175,15 +175,14 @@ class MainActivity : Activity() {
         button("Connect FT232H") { connect() }
         button("Check I2C lines") { work { (bus ?: error("Connect FT232H first")).lineReport() } }
         radioPane.addView(radioText("TRAFFIC  /  ALERT-C",18f,Color.rgb(105,230,210)))
-        trafficEnabled = CheckBox(this).apply { text="Monitor RDS traffic while foregrounded"; isChecked=true; setTextColor(Color.WHITE) }
+        trafficEnabled = CheckBox(this).apply { text="Record traffic"; isChecked=true; setTextColor(Color.WHITE) }
         radioPane.addView(trafficEnabled)
-        trafficView = TextView(this).apply { text="Initialize and tune a receiver, then enable monitoring."; textSize=14f; setTextIsSelectable(true); setTextColor(Color.rgb(105,230,210)); background=panel(Color.rgb(22,39,53)); setPadding(dp(16),dp(16),dp(16),dp(16)) }
-        val trafficScroll=ScrollView(this).apply { isFillViewport=true; addView(trafficView) }
-        radioPane.addView(trafficScroll,LinearLayout.LayoutParams(-1,0,1f))
+        trafficView = TrafficDashboard(this)
+        radioPane.addView(trafficView,LinearLayout.LayoutParams(-1,0,1f))
         val sessionRow=LinearLayout(this)
         radioPane.addView(sessionRow)
         sessionRow.addView(radioButton("Copy session") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("Traffic observations",traffic.report(250))) },LinearLayout.LayoutParams(0,-2,1f))
-        sessionRow.addView(radioButton("Clear") { traffic.clear(); trafficView.text=traffic.report() },LinearLayout.LayoutParams(0,-2,1f))
+        sessionRow.addView(radioButton("Clear") { traffic.clear(); trafficView.reset(traffic.frame()) },LinearLayout.LayoutParams(0,-2,1f))
         val txStart = body.childCount
         address = EditText(this).apply { setSingleLine(); setText("63"); hint="7-bit hexadecimal address" }; body.addView(address)
         button("Check I2C bus (non-destructive)") { work {
