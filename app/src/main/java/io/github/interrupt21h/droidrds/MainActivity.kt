@@ -18,6 +18,7 @@ class MainActivity : Activity() {
     private var bus: Ft232h? = null
     private var busy = false
     private var si4703: Si4703? = null
+    private var rda: Rda5807? = null
     private val permission = "io.github.interrupt21h.droidrds.USB"
     private val receiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -26,6 +27,7 @@ class MainActivity : Activity() {
                 else output.text = "USB permission denied"
             } else if (intent.action == UsbManager.ACTION_USB_DEVICE_DETACHED) {
                 si4703 = null
+                rda = null
                 output.text = "USB detached; reconnect before diagnostics"
             }
         }
@@ -92,6 +94,28 @@ class MainActivity : Activity() {
         button("Capture RDS for 10 seconds") {
             work { (si4703 ?: error("Initialize receiver first")).capture(10) }
         }
+        label("RDA5807M receiver", 24f)
+        label("Use a dedicated receiver bus; do not connect Si4713 at 0x11.")
+        button("Initialize RDA5807M") {
+            work {
+                rda=null
+                val chip=Rda5807(bus ?: error("Connect FT232H first"))
+                val result=chip.initialize()
+                rda=chip
+                result
+            }
+        }
+        button("Tune RDA5807M to entered frequency") {
+            val khz=rxFreq.text.toString().toBigDecimalOrNull()?.multiply(java.math.BigDecimal(1000))
+            work { (rda ?: error("Initialize RDA5807M first")).tune(khz?.intValueExact() ?: error("Invalid frequency")) }
+        }
+        button("RDA5807M seek down") { work { (rda ?: error("Initialize first")).seek(false) } }
+        button("RDA5807M seek up") { work { (rda ?: error("Initialize first")).seek(true) } }
+        button("RDA5807M status") { work { (rda ?: error("Initialize first")).report() } }
+        button("Apply RDA5807M volume") {
+            val level=volume.progress
+            work { (rda ?: error("Initialize first")).volume(level) }
+        }
         label("Receiver register capture", 22f)
         label("Select the known receiver model. A shared 0x10 ACK is not identification. Receiver must be powered, tuned and configured for RDS externally.")
         for (kind in ReceiverKind.entries) {
@@ -115,6 +139,13 @@ class MainActivity : Activity() {
         button("Decode captured groups") {
             output.text = try { raw.text.toString().lineSequence().filter { it.isNotBlank() }.take(500).map { RdsGroup.parse(it).describe() }.joinToString("\n\n") } catch(e: Exception) { e.message }
         }
+        button("Assemble station and RadioText") {
+            try {
+                val decoder=RdsDecoder()
+                raw.text.toString().lineSequence().filter { it.isNotBlank() }.take(500).forEach { decoder.accept(RdsGroup.parse(it)) }
+                output.text=decoder.report()
+            } catch(e:Exception) { output.text=e.message }
+        }
         output = TextView(this).apply { setTextIsSelectable(true); text="Ready"; textSize=15f; setTextColor(Color.rgb(130,220,210)) }; body.addView(output)
         button("Copy report") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS",output.text)) }
         setContentView(scroll)
@@ -127,7 +158,7 @@ class MainActivity : Activity() {
         if (!usb.hasPermission(device)) {
             usb.requestPermission(device,PendingIntent.getBroadcast(this,0,Intent(permission).setPackage(packageName),PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)); return
         }
-        work { si4703=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected" }
+        work { si4703=null; rda=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected" }
     }
     private fun work(task: () -> String) {
         if (busy) return
