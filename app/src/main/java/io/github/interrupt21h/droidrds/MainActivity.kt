@@ -27,6 +27,12 @@ class MainActivity : Activity() {
     private val traffic = TrafficFeed()
     private lateinit var trafficView: TextView
     private lateinit var trafficEnabled: CheckBox
+    private lateinit var radioStatus: TextView
+    private lateinit var frequencyDisplay: TextView
+    private lateinit var signalMeter: ProgressBar
+    private var selectedKhz=99500
+    private var lastTrafficRender=0L
+    private var pendingOperation: (() -> String)? = null
     private val poll = object: Runnable {
         override fun run() {
             if (!foreground) return
@@ -42,6 +48,12 @@ class MainActivity : Activity() {
                         if (collect && b != null) {
                             val sample = Receiver(b, if(s != null) ReceiverKind.SI4703 else ReceiverKind.RDA5807M).snapshot()
                             traffic.accept(sample)
+                            val khz=(if(s!=null) 87500 else 87000)+(sample.registers[1].let { if(s!=null) it else sample.registers[0] } and 1023)*100
+                            runOnUiThread { if (!isDestroyed && token==generation) {
+                                signalMeter.progress=sample.rssi.coerceIn(0,127)
+                                frequencyDisplay.text="%.1f MHz".format(khz/1000.0)
+                                radioStatus.text="RSSI "+sample.rssi+" • "+(if(sample.stereo) "Stereo" else "Mono")+" • "+(if(sample.group!=null) "RDS received" else "Waiting for RDS")
+                            } }
                             "RSSI: "+sample.rssi+" • Stereo: "+sample.stereo
                         } else (s?.diagnostics() ?: d?.report() ?: error("No receiver")) +
                             "\n" + (b?.lineReport() ?: "")
@@ -54,7 +66,7 @@ class MainActivity : Activity() {
                         } else {
                             result.fold(onSuccess = {
                                 failures = 0
-                                if (collect) trafficView.text = traffic.report()
+                                if (collect && SystemClock.elapsedRealtime()-lastTrafficRender>=750) { trafficView.text = traffic.report(); lastTrafficRender=SystemClock.elapsedRealtime() }
                                 live.text = "Updated " + java.text.DateFormat.getTimeInstance().format(java.util.Date()) + "\n" + it
                             }, onFailure = {
                                 failures++
@@ -65,6 +77,7 @@ class MainActivity : Activity() {
                                 }
                             })
                         }
+                        pendingOperation?.let { pendingOperation=null; work(it) }
                     }
                 }
             }
@@ -96,10 +109,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         usb = getSystemService(USB_SERVICE) as UsbManager
         ContextCompat.registerReceiver(this, receiver, IntentFilter().apply { addAction(permission); addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        val root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(13,22,34)) }
         val scroll = ScrollView(this)
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32,24,32,32) }
         scroll.addView(body)
-        ViewCompat.setOnApplyWindowInsetsListener(scroll) { v, i ->
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, i ->
             val bars = i.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             v.setPadding(bars.left,bars.top,bars.right,bars.bottom); i
         }
@@ -108,6 +122,38 @@ class MainActivity : Activity() {
         body.setBackgroundColor(Color.rgb(13,22,34))
         fun label(s: String, size: Float = 16f) { body.addView(TextView(this).apply { text=s; textSize=size; setTextColor(if(size>=20) Color.rgb(105,230,210) else Color.rgb(210,223,235)); setPadding(0,dp(12),0,dp(8)); if(size>=20) typeface=android.graphics.Typeface.DEFAULT_BOLD }) }
         fun button(s: String, f: () -> Unit) { body.addView(Button(this).apply { text=s; isAllCaps=false; setTextColor(Color.WHITE); background=panel(Color.rgb(34,68,88)); minHeight=dp(48); layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) }; setOnClickListener { f() } }) }
+        val nav=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        val radioTab=Button(this).apply { text="Radio"; isAllCaps=false }
+        val setupTab=Button(this).apply { text="Setup & diagnostics"; isAllCaps=false }
+        nav.addView(radioTab,LinearLayout.LayoutParams(0,-2,1f)); nav.addView(setupTab,LinearLayout.LayoutParams(0,-2,1f))
+        root.addView(nav)
+        val radioPane=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(12)) }
+        root.addView(radioPane,LinearLayout.LayoutParams(-1,0,1f))
+        root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        scroll.visibility=android.view.View.GONE
+        fun radioText(value:String,size:Float,color:Int=Color.WHITE)=TextView(this).apply { text=value; textSize=size; setTextColor(color); setPadding(0,dp(4),0,dp(4)) }
+        fun radioButton(value:String,action:()->Unit)=Button(this).apply { text=value; isAllCaps=false; setTextColor(Color.WHITE); background=panel(Color.rgb(34,68,88)); minHeight=dp(48); setOnClickListener { action() } }
+        radioPane.addView(radioText("droidRDS  /  FM receiver",22f,Color.rgb(105,230,210)))
+        frequencyDisplay=radioText("— MHz",42f,Color.rgb(105,230,210)).apply { gravity=android.view.Gravity.CENTER; typeface=android.graphics.Typeface.create("sans-serif-light",0) }
+        radioPane.addView(frequencyDisplay)
+        radioStatus=radioText("Initialize receiver in Setup",14f)
+        radioPane.addView(radioStatus)
+        signalMeter=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=127; progressTintList=android.content.res.ColorStateList.valueOf(Color.rgb(105,230,210)) }
+        radioPane.addView(signalMeter)
+        val dial=SeekBar(this).apply { max=205; progress=120; contentDescription="FM frequency" }
+        val chosen=radioText("Tune to 99.5 MHz",16f)
+        radioPane.addView(chosen); radioPane.addView(dial)
+        fun select(khz:Int) { selectedKhz=khz.coerceIn(87500,108000); dial.progress=(selectedKhz-87500)/100; chosen.text="Tune to %.1f MHz".format(selectedKhz/1000.0) }
+        dial.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(v:SeekBar?,p:Int,fromUser:Boolean) { if(fromUser) { selectedKhz=87500+p*100; chosen.text="Tune to %.1f MHz".format(selectedKhz/1000.0) } }; override fun onStartTrackingTouch(v:SeekBar?){}; override fun onStopTrackingTouch(v:SeekBar?){} })
+        fun tuneSelected() { val k=selectedKhz; work { si4703?.tune(k) ?: rda?.tune(k) ?: error("Initialize receiver in Setup") } }
+        val controls=LinearLayout(this)
+        for(v in listOf(radioButton("−") { select(selectedKhz-100) },radioButton("Tune") { tuneSelected() },radioButton("+") { select(selectedKhz+100) })) controls.addView(v,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(4) })
+        radioPane.addView(controls)
+        val seekRow=LinearLayout(this)
+        for(up in listOf(false,true)) seekRow.addView(radioButton(if(up) "Seek ›" else "‹ Seek") { work { si4703?.seek(up) ?: rda?.seek(up) ?: error("Initialize receiver in Setup") } },LinearLayout.LayoutParams(0,-2,1f))
+        radioPane.addView(seekRow)
+        radioTab.setOnClickListener { radioPane.visibility=android.view.View.VISIBLE; scroll.visibility=android.view.View.GONE }
+        setupTab.setOnClickListener { radioPane.visibility=android.view.View.GONE; scroll.visibility=android.view.View.VISIBLE }
         label("droidRDS", 32f)
         label("FT232H • FM/RDS laboratory diagnostics")
         label("Build: "+packageManager.getPackageInfo(packageName,0).versionName, 13f)
@@ -128,13 +174,16 @@ class MainActivity : Activity() {
         label("D0 → SCL; D1+D2 → SDA; common GND. Verify pull-ups and board voltage. RF commands are not exposed.")
         button("Connect FT232H") { connect() }
         button("Check I2C lines") { work { (bus ?: error("Connect FT232H first")).lineReport() } }
-        label("Live traffic monitor", 24f)
-        trafficEnabled = CheckBox(this).apply { text="Monitor RDS traffic while foregrounded"; isChecked=false }
-        body.addView(trafficEnabled)
+        radioPane.addView(radioText("TRAFFIC  /  ALERT-C",18f,Color.rgb(105,230,210)))
+        trafficEnabled = CheckBox(this).apply { text="Monitor RDS traffic while foregrounded"; isChecked=true; setTextColor(Color.WHITE) }
+        radioPane.addView(trafficEnabled)
         trafficView = TextView(this).apply { text="Initialize and tune a receiver, then enable monitoring."; textSize=14f; setTextIsSelectable(true); setTextColor(Color.rgb(105,230,210)); background=panel(Color.rgb(22,39,53)); setPadding(dp(16),dp(16),dp(16),dp(16)) }
-        body.addView(trafficView)
-        button("Copy traffic session") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("Traffic observations",traffic.report(250))) }
-        button("Clear traffic session") { traffic.clear(); trafficView.text=traffic.report() }
+        val trafficScroll=ScrollView(this).apply { isFillViewport=true; addView(trafficView) }
+        radioPane.addView(trafficScroll,LinearLayout.LayoutParams(-1,0,1f))
+        val sessionRow=LinearLayout(this)
+        radioPane.addView(sessionRow)
+        sessionRow.addView(radioButton("Copy session") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("Traffic observations",traffic.report(250))) },LinearLayout.LayoutParams(0,-2,1f))
+        sessionRow.addView(radioButton("Clear") { traffic.clear(); trafficView.text=traffic.report() },LinearLayout.LayoutParams(0,-2,1f))
         val txStart = body.childCount
         address = EditText(this).apply { setSingleLine(); setText("63"); hint="7-bit hexadecimal address" }; body.addView(address)
         button("Check I2C bus (non-destructive)") { work {
@@ -314,8 +363,8 @@ class MainActivity : Activity() {
             }
         }
         button("Copy live diagnostics") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS diagnostics",live.text)) }
-        setContentView(scroll)
-        ViewCompat.requestApplyInsets(scroll)
+        setContentView(root)
+        ViewCompat.requestApplyInsets(root)
     }
     private fun connect() {
         if (busy) return
@@ -329,15 +378,16 @@ class MainActivity : Activity() {
         work { si4703=null; rda=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected • " + device.deviceName + "\n" + (bus?.lineReport() ?: "") }
     }
     private fun work(task: () -> String) {
-        if (busy) { output.text="Receiver busy; retry shortly or disable traffic monitoring."; return }
+        if (busy) { pendingOperation=task; radioStatus.text="Operation queued…"; return }
         busy=true; output.text="Working…"
         val token = generation
         thread {
             val result=try { task() } catch(e: Exception) { "Error: "+e.message }
             runOnUiThread {
                 busy=false
-                if (!isDestroyed && token == generation) { output.text=result; failures=0; getPreferences(MODE_PRIVATE).edit().putString("lastDiagnostics",result.take(32000)).apply() }
+                if (!isDestroyed && token == generation) { output.text=result; radioStatus.text=result.lineSequence().firstOrNull() ?: "Ready"; failures=0; getPreferences(MODE_PRIVATE).edit().putString("lastDiagnostics",result.take(32000)).apply() }
                 else { bus?.close(); bus=null; si4703=null; rda=null }
+                if (!isDestroyed && token == generation) pendingOperation?.let { pendingOperation=null; work(it) }
             }
         }
     }
