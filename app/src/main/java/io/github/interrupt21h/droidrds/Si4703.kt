@@ -25,9 +25,10 @@ class Si4703(private val bus: Ft232h) {
     private fun powerState(): String =
         "DEVICEID=%04X CHIPID=%04X POWERCFG=%04X TEST1=%04X DEV=%d FW=%d".format(
             r[0],r[1],r[2],r[7],(r[1] ushr 6) and 15,r[1] and 63)
-    fun initialize(crystal: Boolean = true, progress: (String) -> Unit = {}): String {
+    fun initialize(crystal: Boolean = true, delayMs: Long = 650, progress: (String) -> Unit = {}): String {
         val trace = mutableListOf<String>()
-        fun record(s: String) { trace.add(s); progress(trace.joinToString("\n")) }
+        val started = SystemClock.elapsedRealtime()
+        fun record(s: String) { trace.add("+${SystemClock.elapsedRealtime()-started} ms: $s"); progress(trace.joinToString("\n")) }
         try {
             read()
             record("After reset: "+powerState())
@@ -35,7 +36,7 @@ class Si4703(private val bus: Ft232h) {
             if (crystal) {
                 r[7] = 0x8100
                 write(7)
-                Thread.sleep(650)
+                Thread.sleep(delayMs)
                 read()
                 record("After oscillator enable: "+powerState())
                 check(r[7] and 0x8000 != 0) { "XOSCEN did not latch" }
@@ -112,6 +113,31 @@ class Si4703(private val bus: Ft232h) {
         return "Si4703 • %.1f MHz • RSSI %d • %s\nRDS sync: %s".format(
             (87500+(r[11] and 1023)*100)/1000.0,r[10] and 255,
             if(r[10] and 0x100 != 0) "Stereo" else "Mono",r[10] and 0x800 != 0)
+    }
+    fun oscillatorTest(delayMs: Long): String {
+        require(delayMs in 500..10000)
+        identify()
+        check(r[2] and 1 == 0) { "Reset receiver before oscillator test" }
+        val before=powerState()
+        r[7]=0x8100
+        write(7)
+        Thread.sleep(delayMs)
+        return "Before: $before\nAfter $delayMs ms (XOSCEN is not proof of oscillation):\n"+rawDiagnostics()
+    }
+    fun powerTest(fullWrite: Boolean): String {
+        identify()
+        val before=powerState()
+        check(r[2] and 1 == 0) { "Reset and enable oscillator before power test" }
+        r[2]=0x4001
+        write(if(fullWrite) 7 else 2)
+        val trace=mutableListOf("Before: $before")
+        val start=SystemClock.elapsedRealtime()
+        repeat(8) {
+            Thread.sleep(250)
+            read()
+            trace.add("+${SystemClock.elapsedRealtime()-start} ms: "+powerState())
+        }
+        return trace.joinToString("\n")+"\n"+rawDiagnostics()
     }
     fun rawDiagnostics(): String {
         read()
