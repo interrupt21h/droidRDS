@@ -94,8 +94,11 @@ class MainActivity : Activity() {
             val bars = i.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             v.setPadding(bars.left,bars.top,bars.right,bars.bottom); i
         }
-        fun label(s: String, size: Float = 16f) { body.addView(TextView(this).apply { text=s; textSize=size; setPadding(0,12,0,8) }) }
-        fun button(s: String, f: () -> Unit) { body.addView(Button(this).apply { text=s; setOnClickListener { f() } }) }
+        fun dp(n:Int) = (n * resources.displayMetrics.density).toInt()
+        fun panel(color:Int) = android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(14).toFloat() }
+        body.setBackgroundColor(Color.rgb(13,22,34))
+        fun label(s: String, size: Float = 16f) { body.addView(TextView(this).apply { text=s; textSize=size; setTextColor(if(size>=20) Color.rgb(105,230,210) else Color.rgb(210,223,235)); setPadding(0,dp(12),0,dp(8)); if(size>=20) typeface=android.graphics.Typeface.DEFAULT_BOLD }) }
+        fun button(s: String, f: () -> Unit) { body.addView(Button(this).apply { text=s; isAllCaps=false; setTextColor(Color.WHITE); background=panel(Color.rgb(34,68,88)); minHeight=dp(48); layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) }; setOnClickListener { f() } }) }
         label("droidRDS", 32f)
         label("FT232H • FM/RDS laboratory diagnostics")
         label("Build: "+packageManager.getPackageInfo(packageName,0).versionName, 13f)
@@ -103,9 +106,11 @@ class MainActivity : Activity() {
         selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Si4703 receiver", "RDA5807M receiver", "Si4713 diagnostics", "Offline tools"))
         body.addView(selector)
         live = TextView(this).apply { text = "No receiver initialized"; textSize = 15f; setTextIsSelectable(true); typeface = android.graphics.Typeface.MONOSPACE }
+        live.setTextColor(Color.rgb(105,230,210)); live.background=panel(Color.rgb(22,39,53)); live.setPadding(dp(16),dp(16),dp(16),dp(16))
         body.addView(live)
         label("Last operation / initialization trace")
         output = TextView(this).apply { setTextIsSelectable(true); text=getPreferences(MODE_PRIVATE).getString("lastDiagnostics","Ready — power diagnostics v3"); textSize=14f; typeface=android.graphics.Typeface.MONOSPACE }
+        output.setTextColor(Color.rgb(224,233,242)); output.background=panel(Color.rgb(22,39,53)); output.setPadding(dp(16),dp(16),dp(16),dp(16))
         body.addView(output)
         button("Copy operation diagnostics") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS",output.text)) }
         autoRefresh = CheckBox(this).apply { text = "Live telemetry (every 2 seconds when idle)"; isChecked = true }
@@ -253,6 +258,22 @@ class MainActivity : Activity() {
                 raw.text.toString().lineSequence().filter { it.isNotBlank() }.take(500).forEach { decoder.accept(RdsGroup.parse(it)) }
                 output.text=decoder.report()
             } catch(e:Exception) { output.text=e.message }
+        }
+        label("Traffic intelligence / ALERT-C", 24f)
+        label(TrafficReference.guide)
+        button("Inspect traffic service announcements") {
+            output.text = runCatching {
+                TrafficReference.describe(raw.text.toString().lineSequence().filter { it.isNotBlank() }.take(500).map { RdsGroup.parse(it) }.toList())
+            }.getOrElse { "Invalid capture: "+it.message }
+        }
+        val locationCode=EditText(this).apply { inputType=2; hint="Location reference (decimal)" }
+        body.addView(locationCode)
+        button("Classify location reference") {
+            output.text=runCatching {
+                val code=locationCode.text.toString().toInt()
+                "%d / 0x%04X • %s".format(code,code,TrafficReference.locationClass(code))+
+                    "\nGeographic resolution requires the matching authorized location table."
+            }.getOrElse { it.message ?: "Invalid code" }
         }
         val offlineEnd = body.childCount
         
