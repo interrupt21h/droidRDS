@@ -19,3 +19,7 @@ The GPIO-bitbanged transport may be too slow to capture all RDS groups. Capture 
 ### Receiver detection diagnostics
 
 Use Check I2C bus to inspect idle levels without sending an address. For Si4703, choose Detect and initialize Si4703 after confirming exclusive wiring. The adapter asserts RST, drives SDIO low with SCLK released, checks line levels, releases RST, then releases SDIO and checks idle. An ACK at 0x10 must be followed by chip identity verification before configuration. SEN is externally strapped high if the board has no pull-up. RST must connect to D3. A shared address is not proof of device type. Hardware validation is still required.
+
+### Device profiles and live telemetry
+
+Si4703 is the default profile. Select RDA5807M, Si4713 diagnostics or Offline tools to reveal their controls. Initialize the selected receiver explicitly after connecting USB. Foreground telemetry attempts a refresh every two seconds while idle, without overlapping manual operations. Si4703 telemetry includes frequency, RSSI, stereo, RDS synchronization/readiness, STC, AFC rail, seek failure, firmware, block errors, raw RDS blocks and all 16 registers. GPIO levels and read latency are diagnostic observations, not electrical measurements. Three consecutive polling failures require reinitialization. Copy live diagnostics separately from command output. Profile selection changes visible controls, not the initialized physical receiver. Hardware timing and Android build validation remain outstanding.
