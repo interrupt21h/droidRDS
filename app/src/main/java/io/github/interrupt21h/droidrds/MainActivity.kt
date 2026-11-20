@@ -17,6 +17,51 @@ class MainActivity : Activity() {
     private lateinit var address: EditText
     private var bus: Ft232h? = null
     private var busy = false
+    private lateinit var live: TextView
+    private lateinit var autoRefresh: CheckBox
+    private val handler = Handler(Looper.getMainLooper())
+    private var foreground = false
+    private var generation = 0
+    private var deviceName: String? = null
+    private var failures = 0
+    private val poll = object: Runnable {
+        override fun run() {
+            if (!foreground) return
+            if (!busy && autoRefresh.isChecked && (si4703 != null || rda != null)) {
+                val s = si4703
+                val d = rda
+                val b = bus
+                val token = generation
+                busy = true
+                thread {
+                    val result = runCatching {
+                        (s?.diagnostics() ?: d?.report() ?: error("No receiver")) +
+                            "\n" + (b?.lineReport() ?: "")
+                    }
+                    runOnUiThread {
+                        busy = false
+                        if (isDestroyed || token != generation) {
+                            b?.close()
+                            if (bus === b) bus = null
+                        } else {
+                            result.fold(onSuccess = {
+                                failures = 0
+                                live.text = "Updated " + java.text.DateFormat.getTimeInstance().format(java.util.Date()) + "\n" + it
+                            }, onFailure = {
+                                failures++
+                                live.text = "Telemetry stale • failure $failures: " + it.message
+                                if (failures >= 3) {
+                                    si4703 = null; rda = null
+                                    live.append("\nReinitialize receiver to resume.")
+                                }
+                            })
+                        }
+                    }
+                }
+            }
+            handler.postDelayed(this, 2000)
+        }
+    }
     private var si4703: Si4703? = null
     private var rda: Rda5807? = null
     private val permission = "io.github.interrupt21h.droidrds.USB"
@@ -26,8 +71,14 @@ class MainActivity : Activity() {
                 if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED,false)) connect()
                 else output.text = "USB permission denied"
             } else if (intent.action == UsbManager.ACTION_USB_DEVICE_DETACHED) {
+                val detached = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+                if (detached?.deviceName != deviceName) return
+                generation++
                 si4703 = null
                 rda = null
+                deviceName = null
+                if (!busy) { bus?.close(); bus = null }
+                live.text = "Disconnected"
                 output.text = "USB detached; reconnect before diagnostics"
             }
         }
@@ -46,10 +97,20 @@ class MainActivity : Activity() {
         fun label(s: String, size: Float = 16f) { body.addView(TextView(this).apply { text=s; textSize=size; setPadding(0,12,0,8) }) }
         fun button(s: String, f: () -> Unit) { body.addView(Button(this).apply { text=s; setOnClickListener { f() } }) }
         label("droidRDS", 32f)
-        label("FT232H / Si4713 • laboratory diagnostics")
+        label("FT232H • FM/RDS laboratory diagnostics")
+        val selector = Spinner(this)
+        selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Si4703 receiver", "RDA5807M receiver", "Si4713 diagnostics", "Offline tools"))
+        body.addView(selector)
+        live = TextView(this).apply { text = "No receiver initialized"; textSize = 15f; setTextIsSelectable(true); typeface = android.graphics.Typeface.MONOSPACE }
+        body.addView(live)
+        autoRefresh = CheckBox(this).apply { text = "Live telemetry (every 2 seconds when idle)"; isChecked = true }
+        body.addView(autoRefresh)
+        
         label("D0 → SCL; D1+D2 → SDA; common GND. Verify pull-ups and board voltage. RF commands are not exposed.")
-        address = EditText(this).apply { setSingleLine(); setText("63"); hint="7-bit hexadecimal address" }; body.addView(address)
         button("Connect FT232H") { connect() }
+        button("Check I2C lines") { work { (bus ?: error("Connect FT232H first")).lineReport() } }
+        val txStart = body.childCount
+        address = EditText(this).apply { setSingleLine(); setText("63"); hint="7-bit hexadecimal address" }; body.addView(address)
         button("Check I2C bus (non-destructive)") { work {
             val b = bus ?: error("Connect FT232H first")
             b.checkIdle()
@@ -61,6 +122,7 @@ class MainActivity : Activity() {
             val radio = Radio(bus ?: error("Connect FT232H first"), a)
             if (!radio.probe()) "No ACK" else "ACK observed\n" + radio.revision()
         } }
+        val siStart = body.childCount
         label("Si4703 FM receiver", 24f)
         label("D3 → RST; SEN → 3.3 V through 4.7 kΩ if no onboard pull-up. D1 and D2 must both connect to SDIO. Use a dedicated Si4703 bus. Detection checks reset strap, idle levels, ACK and chip ID.")
         val rxFreq = EditText(this).apply { setSingleLine(); inputType=8194; setText("99.5"); hint="MHz" }
@@ -102,7 +164,12 @@ class MainActivity : Activity() {
         button("Capture RDS for 10 seconds") {
             work { (si4703 ?: error("Initialize receiver first")).capture(10) }
         }
+        val rdaStart = body.childCount
         label("RDA5807M receiver", 24f)
+        val rdaFreq = EditText(this).apply { setSingleLine(); inputType=8194; setText("99.5"); hint="MHz" }
+        body.addView(rdaFreq)
+        val rdaVolume = SeekBar(this).apply { max=15; progress=1 }
+        body.addView(rdaVolume)
         label("Use a dedicated receiver bus; do not connect Si4713 at 0x11.")
         button("Initialize RDA5807M") {
             work {
@@ -116,16 +183,17 @@ class MainActivity : Activity() {
             }
         }
         button("Tune RDA5807M to entered frequency") {
-            val khz=rxFreq.text.toString().toBigDecimalOrNull()?.multiply(java.math.BigDecimal(1000))
+            val khz=rdaFreq.text.toString().toBigDecimalOrNull()?.multiply(java.math.BigDecimal(1000))
             work { (rda ?: error("Initialize RDA5807M first")).tune(khz?.intValueExact() ?: error("Invalid frequency")) }
         }
         button("RDA5807M seek down") { work { (rda ?: error("Initialize first")).seek(false) } }
         button("RDA5807M seek up") { work { (rda ?: error("Initialize first")).seek(true) } }
         button("RDA5807M status") { work { (rda ?: error("Initialize first")).report() } }
         button("Apply RDA5807M volume") {
-            val level=volume.progress
+            val level=rdaVolume.progress
             work { (rda ?: error("Initialize first")).volume(level) }
         }
+        val snapshotStart = body.childCount
         label("Receiver register capture", 22f)
         label("Select the known receiver model. A shared 0x10 ACK is not identification. Receiver must be powered, tuned and configured for RDS externally.")
         for (kind in ReceiverKind.entries) {
@@ -138,6 +206,7 @@ class MainActivity : Activity() {
                 }
             }
         }
+        val offlineStart = body.childCount
         label("Offline frequency planner", 22f)
         val freq = EditText(this).apply { setSingleLine(); inputType=8194; setText("99.5") }; body.addView(freq)
         button("Validate frequency (no RF)") {
@@ -156,8 +225,29 @@ class MainActivity : Activity() {
                 output.text=decoder.report()
             } catch(e:Exception) { output.text=e.message }
         }
+        val offlineEnd = body.childCount
         output = TextView(this).apply { setTextIsSelectable(true); text="Ready"; textSize=15f; setTextColor(Color.rgb(130,220,210)) }; body.addView(output)
         button("Copy report") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS",output.text)) }
+        fun showProfile(position: Int) {
+            for (i in txStart until offlineEnd) {
+                val visible = when {
+                    i < siStart -> position == 2
+                    i < rdaStart -> position == 0
+                    i < snapshotStart -> position == 1
+                    i < offlineStart -> position == 3
+                    else -> position == 3
+                }
+                body.getChildAt(i).visibility = if (visible) android.view.View.VISIBLE else android.view.View.GONE
+            }
+        }
+        showProfile(0)
+        selector.onItemSelectedListener = object: android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                showProfile(position)
+            }
+        }
+        button("Copy live diagnostics") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS diagnostics",live.text)) }
         setContentView(scroll)
         ViewCompat.requestApplyInsets(scroll)
     }
@@ -168,12 +258,24 @@ class MainActivity : Activity() {
         if (!usb.hasPermission(device)) {
             usb.requestPermission(device,PendingIntent.getBroadcast(this,0,Intent(permission).setPackage(packageName),PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)); return
         }
-        work { si4703=null; rda=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected" }
+        deviceName = device.deviceName
+        live.text = "Connecting FT232H • 0403:6014"
+        work { si4703=null; rda=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected • " + device.deviceName + "\n" + (bus?.lineReport() ?: "") }
     }
     private fun work(task: () -> String) {
         if (busy) return
         busy=true; output.text="Working…"
-        thread { val result=try { task() } catch(e: Exception) { "Error: "+e.message }; runOnUiThread { busy=false; if (!isDestroyed) output.text=result else bus?.close() } }
+        val token = generation
+        thread {
+            val result=try { task() } catch(e: Exception) { "Error: "+e.message }
+            runOnUiThread {
+                busy=false
+                if (!isDestroyed && token == generation) { output.text=result; failures=0 }
+                else { bus?.close(); bus=null; si4703=null; rda=null }
+            }
+        }
     }
+    override fun onStart() { super.onStart(); foreground=true; handler.post(poll) }
+    override fun onStop() { foreground=false; handler.removeCallbacks(poll); super.onStop() }
     override fun onDestroy() { unregisterReceiver(receiver); if (!busy) bus?.close(); super.onDestroy() }
 }
