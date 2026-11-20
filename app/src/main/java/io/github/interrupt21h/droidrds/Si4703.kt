@@ -87,6 +87,31 @@ class Si4703(private val bus: Ft232h) {
             (87500+(r[11] and 1023)*100)/1000.0,r[10] and 255,
             if(r[10] and 0x100 != 0) "Stereo" else "Mono",r[10] and 0x800 != 0)
     }
+    fun diagnostics(): String {
+        val start = SystemClock.elapsedRealtime()
+        read()
+        check(r[0] == 0x1242 && ((r[1] ushr 6) and 15) == 9 && r[2] and 1 != 0) { "Si4703 identity or power state lost" }
+        val a=r[10]; val b=r[11]
+        val ready=a and 0x8000 != 0
+        val sync=a and 0x0800 != 0
+        val errors=listOf((a shr 9) and 3,(b shr 14) and 3,(b shr 12) and 3,(b shr 10) and 3)
+        return buildString {
+            appendLine("Si4703 • 0x10 • %.1f MHz".format((87500+(b and 1023)*100)/1000.0))
+            appendLine("RSSI: ${a and 255} dBµV • "+ if(a and 0x100 != 0) "Stereo" else "Mono")
+            appendLine("RDS sync: $sync • Ready: $ready")
+            appendLine("STC: ${a and 0x4000 != 0} • Seek fail: ${a and 0x2000 != 0} • AFC rail: ${a and 0x1000 != 0}")
+            appendLine("DEVICEID %04X • CHIPID %04X".format(r[0],r[1]))
+            appendLine("Firmware: ${r[1] and 63} • Volume: ${r[5] and 15}")
+            appendLine("BLER A/B/C/D: "+errors.joinToString("/")+" (3 = uncorrectable)")
+            if(ready && sync && errors.none { it == 3 }) {
+                appendLine("RDS blocks: "+(12..15).joinToString(" ") { "%04X".format(r[it]) })
+                appendLine("PI %04X • Group %d%s".format(r[12],r[13] ushr 12,if(r[13] and 0x800 != 0) "B" else "A"))
+            }
+            appendLine("Read latency: ${SystemClock.elapsedRealtime()-start} ms")
+            appendLine("Registers:")
+            for(i in 0..15 step 4) appendLine((i..i+3).joinToString("  ") { "%02X:%04X".format(it,r[it]) })
+        }
+    }
     fun capture(seconds: Int): String {
         require(seconds in 1..30)
         val end = SystemClock.elapsedRealtime()+seconds*1000L
