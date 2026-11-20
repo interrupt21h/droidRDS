@@ -21,6 +21,9 @@ class TrafficFeed {
         entries[g]=if(old==null) Observation(g,now,now,1) else old.apply { last=now; count++ }
         if(entries.size>250) entries.remove(entries.keys.first())
     }
+    data class Card(val group:RdsGroup,val first:Long,val last:Long,val count:Int,val confirmed:Boolean)
+    data class Frame(val samples:Long,val rejected:Long,val cards:List<Card>)
+    @Synchronized fun frame():Frame = Frame(samples,rejected,entries.values.map { Card(it.group,it.first,it.last,it.count,assignments[it.group.a]==16) }.asReversed())
     @Synchronized fun report(limit:Int=30):String=buildString {
         appendLine("TRAFFIC MONITOR • $samples polls • $rejected rejected • ${entries.size} distinct groups")
         appendLine("Snapshot counts may include repeated reads; not unique broadcasts.")
