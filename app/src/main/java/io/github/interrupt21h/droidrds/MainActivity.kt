@@ -24,18 +24,26 @@ class MainActivity : Activity() {
     private var generation = 0
     private var deviceName: String? = null
     private var failures = 0
+    private val traffic = TrafficFeed()
+    private lateinit var trafficView: TextView
+    private lateinit var trafficEnabled: CheckBox
     private val poll = object: Runnable {
         override fun run() {
             if (!foreground) return
-            if (!busy && autoRefresh.isChecked && (si4703 != null || rda != null)) {
+            if (!busy && (autoRefresh.isChecked || trafficEnabled.isChecked) && (si4703 != null || rda != null)) {
                 val s = si4703
                 val d = rda
                 val b = bus
                 val token = generation
+                val collect = trafficEnabled.isChecked
                 busy = true
                 thread {
                     val result = runCatching {
-                        (s?.diagnostics() ?: d?.report() ?: error("No receiver")) +
+                        if (collect && b != null) {
+                            val sample = Receiver(b, if(s != null) ReceiverKind.SI4703 else ReceiverKind.RDA5807M).snapshot()
+                            traffic.accept(sample)
+                            "RSSI: "+sample.rssi+" • Stereo: "+sample.stereo
+                        } else (s?.diagnostics() ?: d?.report() ?: error("No receiver")) +
                             "\n" + (b?.lineReport() ?: "")
                     }
                     runOnUiThread {
@@ -46,6 +54,7 @@ class MainActivity : Activity() {
                         } else {
                             result.fold(onSuccess = {
                                 failures = 0
+                                if (collect) trafficView.text = traffic.report()
                                 live.text = "Updated " + java.text.DateFormat.getTimeInstance().format(java.util.Date()) + "\n" + it
                             }, onFailure = {
                                 failures++
@@ -59,7 +68,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            handler.postDelayed(this, 2000)
+            handler.postDelayed(this, if(trafficEnabled.isChecked) 150 else 2000)
         }
     }
     private var si4703: Si4703? = null
@@ -119,6 +128,13 @@ class MainActivity : Activity() {
         label("D0 → SCL; D1+D2 → SDA; common GND. Verify pull-ups and board voltage. RF commands are not exposed.")
         button("Connect FT232H") { connect() }
         button("Check I2C lines") { work { (bus ?: error("Connect FT232H first")).lineReport() } }
+        label("Live traffic monitor", 24f)
+        trafficEnabled = CheckBox(this).apply { text="Monitor RDS traffic while foregrounded"; isChecked=false }
+        body.addView(trafficEnabled)
+        trafficView = TextView(this).apply { text="Initialize and tune a receiver, then enable monitoring."; textSize=14f; setTextIsSelectable(true); setTextColor(Color.rgb(105,230,210)); background=panel(Color.rgb(22,39,53)); setPadding(dp(16),dp(16),dp(16),dp(16)) }
+        body.addView(trafficView)
+        button("Copy traffic session") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("Traffic observations",traffic.report(250))) }
+        button("Clear traffic session") { traffic.clear(); trafficView.text=traffic.report() }
         val txStart = body.childCount
         address = EditText(this).apply { setSingleLine(); setText("63"); hint="7-bit hexadecimal address" }; body.addView(address)
         button("Check I2C bus (non-destructive)") { work {
@@ -313,7 +329,7 @@ class MainActivity : Activity() {
         work { si4703=null; rda=null; bus?.close(); bus=null; bus=Ft232h(usb,device); "FT232H connected • " + device.deviceName + "\n" + (bus?.lineReport() ?: "") }
     }
     private fun work(task: () -> String) {
-        if (busy) return
+        if (busy) { output.text="Receiver busy; retry shortly or disable traffic monitoring."; return }
         busy=true; output.text="Working…"
         val token = generation
         thread {
