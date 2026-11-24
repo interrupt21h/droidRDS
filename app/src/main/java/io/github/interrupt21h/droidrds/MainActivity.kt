@@ -107,6 +107,7 @@ class MainActivity : Activity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        runCatching { assets.open("alertc-bundled.tsv").reader(Charsets.UTF_8).use { TrafficEvents.load(it) } }.onFailure { android.util.Log.e("droidRDS", "Bundled catalogue unavailable", it) }
         runCatching { openFileInput("alertc.tsv").reader().use { TrafficEvents.load(it) } }
         usb = getSystemService(USB_SERVICE) as UsbManager
         ContextCompat.registerReceiver(this, receiver, IntentFilter().apply { addAction(permission); addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
