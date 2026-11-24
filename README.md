@@ -68,18 +68,17 @@ Telemetry includes frequency, RSSI, stereo, RDS sync/readiness, STC, AFC rail, s
 
 The dashboard distinguishes traffic candidates, ALERT-C announcements, system/tuning groups and multi-group fragments. It preserves the raw RDS blocks and location words even when geographic resolution is unavailable.
 
-The build pipeline is configured to generate an offline event catalogue from the [OpenStreetMap Wiki TMC Event Code List](https://wiki.openstreetmap.org/wiki/TMC/Event_Code_List). It validates catalogue size and selected event identifiers before packaging. A user-supplied TSV catalogue can also be imported.
+On first launch, the app downloads and validates the [OpenStreetMap Wiki TMC Event Code List](https://wiki.openstreetmap.org/wiki/TMC/Event_Code_List), caches it privately for offline use and displays event metadata. Refresh it manually in Setup & diagnostics. A user-supplied TSV catalogue can also be imported.
 
 Event descriptions are not proof that an incident is current or geographically resolved. Location references require the correct service and location table; encrypted values remain raw observations. Repeated reads are not necessarily distinct broadcasts. Full multi-group assembly, geographic resolution and normative ALERT-C conformance are not claimed.
 
 ## Build from source
 
-Requirements: JDK 17, Gradle 8.10.2, Android SDK 35 and Python 3. The catalogue generator requires network access to the source wiki.
+Requirements: JDK 17, Gradle 8.10.2, Android SDK 35. No wiki access is required at build time.
 
 ```bash
 git clone https://github.com/interrupt21h/droidRDS.git
 cd droidRDS
-python3 tools/generate_catalog.py
 gradle --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 ```
 
@@ -107,6 +106,6 @@ The debug APK is written to app/build/outputs/apk/debug/app-debug.apk. See the w
 
 ## License
 
-Original application code and artwork are available under the [MIT License](LICENSE). The generated event catalogue is attributed to OpenStreetMap Wiki contributors under [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0/); its attribution is packaged separately. Third-party specifications retain their respective rights.
+Original application code and artwork are available under the [MIT License](LICENSE). The downloaded event catalogue is attributed to OpenStreetMap Wiki contributors under [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0/); its attribution is included in the cached catalogue. Third-party specifications retain their respective rights.
 
 droidRDS is an independent experimental project, not a certified traffic information or navigation service.
