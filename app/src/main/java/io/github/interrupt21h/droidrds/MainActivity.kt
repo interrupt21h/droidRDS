@@ -107,6 +107,7 @@ class MainActivity : Activity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        runCatching { openFileInput("alertc.tsv").reader().use { TrafficEvents.load(it) } }
         usb = getSystemService(USB_SERVICE) as UsbManager
         ContextCompat.registerReceiver(this, receiver, IntentFilter().apply { addAction(permission); addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
         val root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(13,22,34)) }
@@ -324,6 +325,13 @@ class MainActivity : Activity() {
             } catch(e:Exception) { output.text=e.message }
         }
         label("Traffic intelligence / ALERT-C", 24f)
+        button("Import full ALERT-C event catalogue (TSV)") {
+            val intent=android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                type="*/*"
+            }
+            startActivityForResult(intent, 4819)
+        }
         label(TrafficReference.guide)
         button("Inspect traffic service announcements") {
             output.text = runCatching {
@@ -393,4 +401,18 @@ class MainActivity : Activity() {
     override fun onStart() { super.onStart(); foreground=true; handler.post(poll) }
     override fun onStop() { foreground=false; handler.removeCallbacks(poll); super.onStop() }
     override fun onDestroy() { unregisterReceiver(receiver); if (!busy) bus?.close(); super.onDestroy() }
+    @Deprecated("Activity result callback for document import")
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:android.content.Intent?) {
+        super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode!=4819 || resultCode!=RESULT_OK) return
+        val uri=data?.data ?: return
+        runCatching {
+            val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot open catalogue")
+            require(bytes.size<=2_000_000) { "Catalogue too large" }
+            val count=TrafficEvents.load(bytes.inputStream().reader())
+            openFileOutput("alertc.tsv",MODE_PRIVATE).use { it.write(bytes) }
+            trafficView.reset(traffic.frame())
+            output.text="Imported $count event definitions"
+        }.onFailure { output.text="Catalogue import failed: "+it.message }
+    }
 }
