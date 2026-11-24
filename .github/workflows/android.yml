@@ -14,8 +14,6 @@ jobs:
           gradle-version: '8.10.2'
       - name: Set unique build identifier
         run: echo "DROIDRDS_BUILD_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
-      - name: Generate bundled ALERT-C catalogue
-        run: python3 tools/generate_catalog.py
       - run: gradle --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
       - name: Stage uniquely named APK and checksum
         run: |
