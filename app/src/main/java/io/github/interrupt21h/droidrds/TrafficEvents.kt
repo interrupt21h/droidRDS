@@ -17,7 +17,9 @@ object TrafficEvents {
         109 to "Traffic queue — 1 km",
         110 to "Traffic queue — 2 km",
         131 to "Traffic queue — 3 km",
-        111 to "Traffic queue — 4 km"
+        111 to "Traffic queue — 4 km",
+        738 to "Roadworks — left lane closed",
+        739 to "Roadworks — shoulder closed"
     )
     data class Definition(val code:Int,val name:String,val quantifier:String?,val nature:String?,val urgency:String?,val duration:String?,val directionality:String?,val updateClass:String?)
     @Volatile private var imported:Map<Int,Definition> = emptyMap()
