@@ -2,6 +2,8 @@
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+import json
 import csv
 
 URL = "https://wiki.openstreetmap.org/w/index.php?title=TMC/Event_Code_List&oldid=981793"
@@ -29,8 +31,16 @@ class Tables(HTMLParser):
             self.row = None
 
 parser = Tables()
-with urlopen(Request(URL, headers={"User-Agent": "droidRDS-catalogue/1.0 (github.com/interrupt21h/droidRDS)"}), timeout=60) as response:
-    parser.feed(response.read().decode("utf-8"))
+headers = {"User-Agent": "droidRDS/1.0 (https://github.com/interrupt21h/droidRDS; scott@21h.io)"}
+try:
+    with urlopen(Request(URL, headers=headers), timeout=60) as response:
+        parser.feed(response.read().decode("utf-8"))
+except HTTPError as exc:
+    if exc.code != 403:
+        raise
+    api = "https://wiki.openstreetmap.org/w/api.php?action=parse&oldid=981793&prop=text&format=json&formatversion=2"
+    with urlopen(Request(api, headers=headers), timeout=60) as response:
+        parser.feed(json.load(response)["parse"]["text"])
 events = {}
 active = False
 for row in parser.rows:
