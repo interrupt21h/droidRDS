@@ -107,8 +107,8 @@ class MainActivity : Activity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        runCatching { openFileInput("alertc-online.tsv").reader(Charsets.UTF_8).use { TrafficEvents.load(it) } }
-        runCatching { openFileInput("alertc.tsv").reader().use { TrafficEvents.load(it) } }
+        runCatching { android.util.AtomicFile(java.io.File(filesDir,"alertc-online.tsv")).openRead().reader(Charsets.UTF_8).use { TrafficEvents.load(it) } }
+        if (TrafficEvents.count < 1400) runCatching { openFileInput("alertc.tsv").reader(Charsets.UTF_8).use { TrafficEvents.load(it) } }
         usb = getSystemService(USB_SERVICE) as UsbManager
         ContextCompat.registerReceiver(this, receiver, IntentFilter().apply { addAction(permission); addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
         val root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(13,22,34)) }
@@ -440,12 +440,14 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode!=4819 || resultCode!=RESULT_OK) return
         val uri=data?.data ?: return
+        if(catalogueFetching) { output.text="Wait for catalogue download to finish before importing."; return }
         runCatching {
-            val bytes=contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot open catalogue")
+            val bytes=contentResolver.openInputStream(uri)?.use { java.io.ByteArrayOutputStream().use { out -> val buffer=ByteArray(8192); while(true) { val n=it.read(buffer); if(n<0) break; require(out.size()+n<=2_000_000) { "Catalogue too large" }; out.write(buffer,0,n) }; out.toByteArray() } } ?: error("Cannot open catalogue")
             require(bytes.size<=2_000_000) { "Catalogue too large" }
             val count=TrafficEvents.load(bytes.inputStream().reader())
             openFileOutput("alertc.tsv",MODE_PRIVATE).use { it.write(bytes) }
             trafficView.reset(traffic.frame())
+            catalogueStatus.text="Imported catalogue: $count events"
             output.text="Imported $count event definitions"
         }.onFailure { output.text="Catalogue import failed: "+it.message }
     }
