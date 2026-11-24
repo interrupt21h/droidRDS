@@ -38,6 +38,10 @@ class TrafficDashboard(context:Context): LinearLayout(context) {
             box.addView(label("PI %04X  •  %d%s  •  %s  •  ×%d reads".format(g.a,g.type,g.version,clock.format(Date(c.last)),c.count),12f,muted))
             if(isAlert(c)) {
                 box.addView(label("EVENT ${g.c and 2047} · "+if(TrafficEvents.name(g.c and 2047)!=null) "Catalogue match" else "Description unavailable",12f,muted))
+                TrafficEvents.definition(g.c and 2047)?.let { def ->
+                    val details=listOf("Quantifier" to def.quantifier,"Nature" to def.nature,"Urgency" to def.urgency,"Duration type" to def.duration,"Directionality" to def.directionality,"Update class" to def.updateClass).mapNotNull { (k,v)->v?.let { "$k: $it" } }
+                    if(details.isNotEmpty()) box.addView(label(details.joinToString(" · "),13f,muted))
+                }
                 val pair=LinearLayout(context)
                 val loc=LinearLayout(context).apply { orientation=VERTICAL }
                 loc.addView(label("LOCATION WORD",11f,muted))
