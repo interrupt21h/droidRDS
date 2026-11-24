@@ -107,7 +107,7 @@ class MainActivity : Activity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        runCatching { assets.open("alertc-bundled.tsv").reader(Charsets.UTF_8).use { TrafficEvents.load(it) } }.onFailure { android.util.Log.e("droidRDS", "Bundled catalogue unavailable", it) }
+        runCatching { openFileInput("alertc-online.tsv").reader(Charsets.UTF_8).use { TrafficEvents.load(it) } }
         runCatching { openFileInput("alertc.tsv").reader().use { TrafficEvents.load(it) } }
         usb = getSystemService(USB_SERVICE) as UsbManager
         ContextCompat.registerReceiver(this, receiver, IntentFilter().apply { addAction(permission); addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }, ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -326,6 +326,9 @@ class MainActivity : Activity() {
             } catch(e:Exception) { output.text=e.message }
         }
         label("Traffic intelligence / ALERT-C", 24f)
+        catalogueStatus = TextView(this).apply { text="Event catalogue: "+TrafficEvents.count+" loaded" }
+        body.addView(catalogueStatus)
+        button("Refresh event catalogue from OpenStreetMap") { refreshCatalogue() }
         button("Import full ALERT-C event catalogue (TSV)") {
             val intent=android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(android.content.Intent.CATEGORY_OPENABLE)
@@ -373,6 +376,7 @@ class MainActivity : Activity() {
         button("Copy live diagnostics") { (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("droidRDS diagnostics",live.text)) }
         setContentView(root)
         ViewCompat.requestApplyInsets(root)
+        if (TrafficEvents.count < 1400) refreshCatalogue()
     }
     private fun connect() {
         if (busy) return
@@ -401,6 +405,35 @@ class MainActivity : Activity() {
     }
     override fun onStart() { super.onStart(); foreground=true; handler.post(poll) }
     override fun onStop() { foreground=false; handler.removeCallbacks(poll); super.onStop() }
+    private lateinit var catalogueStatus: TextView
+    private var catalogueFetching=false
+    private fun refreshCatalogue() {
+        if(catalogueFetching) return
+        catalogueFetching=true
+        catalogueStatus.text="Downloading event catalogue…"
+        thread {
+            val result=runCatching {
+                val tsv=OnlineCatalogue.fetch()
+                val cache=android.util.AtomicFile(java.io.File(filesDir,"alertc-online.tsv"))
+                val stream=cache.startWrite()
+                try { stream.write(tsv.toByteArray(Charsets.UTF_8)); cache.finishWrite(stream) }
+                catch(e:Exception) { cache.failWrite(stream); throw e }
+                tsv
+            }
+            runOnUiThread {
+                catalogueFetching=false
+                if(!isDestroyed) {
+                    result.onSuccess { 
+                        val count=TrafficEvents.load(it.reader())
+                        catalogueStatus.text="OpenStreetMap catalogue: $count events · cached offline"
+                        trafficView.reset(traffic.frame())
+                    }.onFailure {
+                        catalogueStatus.text="Catalogue download failed: "+it.message+" · "+TrafficEvents.count+" cached events"
+                    }
+                }
+            }
+        }
+    }
     override fun onDestroy() { unregisterReceiver(receiver); if (!busy) bus?.close(); super.onDestroy() }
     @Deprecated("Activity result callback for document import")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:android.content.Intent?) {
