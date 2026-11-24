@@ -19,7 +19,29 @@ object TrafficEvents {
         131 to "Traffic queue — 3 km",
         111 to "Traffic queue — 4 km"
     )
-    fun name(code:Int):String?=names[code]
+    data class Definition(val code:Int,val name:String,val quantifier:String?,val nature:String?,val urgency:String?,val duration:String?,val directionality:String?,val updateClass:String?)
+    @Volatile private var imported:Map<Int,Definition> = emptyMap()
+    val count:Int get()=imported.size
+    fun load(reader:java.io.Reader):Int {
+        val next=linkedMapOf<Int,Definition>()
+        reader.buffered().useLines { lines ->
+            lines.forEachIndexed { i,line ->
+                if(line.isNotBlank() && !line.startsWith("#") && !line.startsWith("code\t")) {
+                    val p=line.split('\t')
+                    require(p.size>=2) { "Invalid catalogue row ${i+1}" }
+                    val code=p[0].toInt()
+                    require(code in 0..2047 && p[1].isNotBlank() && code !in next)
+                    fun field(n:Int)=p.getOrNull(n)?.trim()?.takeIf { it.isNotEmpty() }
+                    next[code]=Definition(code,p[1],field(2),field(3),field(4),field(5),field(6),field(7))
+                }
+            }
+        }
+        require(next.isNotEmpty())
+        imported=next.toMap()
+        return next.size
+    }
+    fun definition(code:Int)=imported[code]
+    fun name(code:Int):String?=definition(code)?.name ?: names[code]
     fun direction(bit:Int)=if(bit==0) "Positive table direction" else "Negative table direction"
     fun diversion(bit:Int)=if(bit==1) "Diversion advised" else "No diversion advice"
 }
